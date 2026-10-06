@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, time::Duration};
 
 use dns_test::{
     Error, FQDN, Implementation, Network, Resolver,
@@ -97,8 +97,17 @@ fn infinite_recursion_with_unsigned_ds_record() -> Result<(), Error> {
 
     assert!(output.status.is_servfail());
 
-    tshark.wait_for_capture()?;
-
+    // The capture runs on the TLD nameserver, which never sees the response to the client, so wait
+    // for its response to the DS query instead.
+    tshark.wait_until(
+        |captures| {
+            captures.iter().any(|capture| {
+                matches!(capture.direction, Direction::Outgoing { .. })
+                    && capture.message.qtype() == Some(43)
+            })
+        },
+        Duration::from_secs(10),
+    )?;
     let captures = tshark.terminate()?;
 
     // We should see exactly one inbound DS query for FQDN::TEST_DOMAIN
